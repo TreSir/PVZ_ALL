@@ -53,7 +53,7 @@ public class BaseUIManager
         pathDict = new Dictionary<string, string>()
         {
             //格式“{UIConst名字,panelPrefab路径}”,如下
-            //{UIConst.MainMenuPanel, "Resource/Prefabs/MainMenuPanel"}
+            {UIConst.MainMenuPanel, "MainMenuPanel"}
         };
     }
 
@@ -80,14 +80,14 @@ public class BaseUIManager
         GameObject prefab = null;
         if(!prefabDict.TryGetValue(panelName,out prefab))
         {
-            prefab = Resources.Load<GameObject>("Prefab/" + path);
+            prefab = Resources.Load<GameObject>("Prefabs/UI/" + path);
             prefabDict[panelName] = prefab;
         }
         GameObject panelObject = GameObject.Instantiate(prefab, UIRoot, false);
         panel = panelObject.GetComponent<BasePanel>();
         panelDict[panelName] = panel;
         
-        panel.OpenPanel(panelName);
+        panel.OpenPanel();
         Canvas panelCavas = panelObject.GetComponent<Canvas>();
         panelCavas.sortingOrder = sortingOrder;
         sortingOrder += 1; 
@@ -133,5 +133,5 @@ public class BaseUIManager
 public class UIConst
 {
     //这个里面需要提前配置好所有的panel的名字，如下：
-    //public const string MainMenuPanel = "MainMenuPanel";
+    public const string MainMenuPanel = "MainMenuPanel";
 }
