@@ -2,9 +2,9 @@
     "name": "Audio",
     "rootNamespace": "Audio",
     "references": [
-        "Core",
         "Config",
-        "SourceLoad"
+        "SourceLoad",
+        "ObjectPool"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
