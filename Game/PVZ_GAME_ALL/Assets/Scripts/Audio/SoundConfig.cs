@@ -3,6 +3,9 @@ using UnityEngine;
 
 namespace Audio
 {
+    /// <summary>
+    /// 音效配置类,播放音效时,代码调节当前音效的音量、音调、循环设置等参数.
+    /// </summary>
     [Serializable]
     public class SoundConfig
     {

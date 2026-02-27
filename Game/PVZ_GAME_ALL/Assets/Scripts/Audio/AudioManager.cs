@@ -5,6 +5,9 @@ using SourceLoad;
 
 namespace Audio
 {
+    /// <summary>
+    /// 音频管理器类,负责播放背景音乐和音效,以及管理音频源的池化.
+    /// </summary>
     public class AudioManager : MonoBehaviour
     {
         private static AudioManager _instance;
@@ -380,6 +383,9 @@ namespace Audio
             UpdateAllVolumes();
         }
 
+        /// <summary>
+        /// 初始化音频管理器
+        /// </summary>  
         public void Initialize()
         {
             var config = ResourceManager.Load<GameSettingConfig>(ConfigPath);

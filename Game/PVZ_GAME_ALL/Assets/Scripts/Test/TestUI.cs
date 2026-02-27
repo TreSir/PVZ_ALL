@@ -16,7 +16,7 @@ public class TestUI : MonoBehaviour
 
     }
 
-    [ContextMenu("TestUI001")]
+    [ContextMenu("���Դ����")]
     public void OPenMainPanel()
     {
         BaseUIManager.Instance.OpenPanel("MainMenuPanel");

@@ -2,6 +2,7 @@
     "name": "Audio",
     "rootNamespace": "Audio",
     "references": [
+        "Core",
         "Config",
         "SourceLoad"
     ],
