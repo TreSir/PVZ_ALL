@@ -1,41 +1,90 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-
-
-public abstract class BasePanel : MonoBehaviour
+namespace UI
 {
-    public bool isRemove = false;
-    public abstract string UIName {get;}//这个UI面板的文件名
-                           //继承的时候只需要加入各种UI组件的引用，比如Button、Text等等
+    public enum UILifeCycleState
+    {
+        None,
+        Opening,
+        Opened,
+        Paused,
+        Resumed,
+        Closing,
+        Closed
+    }
 
-    /// <summary>
-    //继承的时候通常会获取一下名字
-    //继承的时候还需要把这个UI面板具体的功能实现注册好
-    //比如注册按钮的点击事件等等
-    /// </summary>
-    public abstract void InitUI();
-    protected virtual void Awake()
+    public abstract class BasePanel : MonoBehaviour
     {
-        InitUI();  
-    }
-    public virtual void OpenPanel()
-    {
-        SetActive(true);
-    }
-    public virtual void ClosePanel() 
-    { 
-        isRemove = true;
-        SetActive(false);
-        Destroy(gameObject);
-        if (BaseUIManager.Instance.panelDict.ContainsKey(UIName))
+        public bool isRemove = false;
+        public abstract string UIName { get; }
+
+        protected UILifeCycleState _state = UILifeCycleState.None;
+        public UILifeCycleState State => _state;
+
+        public abstract void InitUI();
+
+        protected virtual void Awake()
         {
-            BaseUIManager.Instance.panelDict.Remove(UIName);
+            _state = UILifeCycleState.None;
+            InitUI();
         }
-    }
-    public virtual void SetActive(bool _bool)
-    {
-        gameObject.SetActive(_bool);
+
+        protected virtual void OnEnable()
+        {
+            if (_state == UILifeCycleState.Paused)
+            {
+                _state = UILifeCycleState.Resumed;
+                OnResume();
+            }
+        }
+
+        protected virtual void OnDisable()
+        {
+            if (_state == UILifeCycleState.Opened)
+            {
+                _state = UILifeCycleState.Paused;
+                OnPause();
+            }
+        }
+
+        public virtual void OpenPanel()
+        {
+            _state = UILifeCycleState.Opening;
+            SetActive(true);
+            OnBeforeOpen();
+            _state = UILifeCycleState.Opened;
+            OnOpened();
+        }
+
+        public virtual void ClosePanel()
+        {
+            if (_state == UILifeCycleState.Closing || _state == UILifeCycleState.Closed)
+                return;
+
+            _state = UILifeCycleState.Closing;
+            OnBeforeClose();
+            isRemove = true;
+            SetActive(false);
+            _state = UILifeCycleState.Closed;
+
+            BaseUIManager.Instance.OnPanelClosed(UIName);
+
+            if (_state == UILifeCycleState.Closed)
+            {
+                Destroy(gameObject);
+            }
+        }
+
+        public virtual void SetActive(bool _bool)
+        {
+            gameObject.SetActive(_bool);
+        }
+
+        protected virtual void OnBeforeOpen() { }
+        protected virtual void OnOpened() { }
+        protected virtual void OnPause() { }
+        protected virtual void OnResume() { }
+        protected virtual void OnBeforeClose() { }
     }
 }

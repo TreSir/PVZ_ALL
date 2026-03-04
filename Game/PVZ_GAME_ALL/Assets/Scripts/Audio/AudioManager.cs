@@ -2,13 +2,12 @@ using System.Collections.Generic;
 using UnityEngine;
 using Config;
 using SourceLoad;
+using Core;
+using ObjectPool;
 
 namespace Audio
 {
-    /// <summary>
-    /// 音频管理器类,负责播放背景音乐和音效,以及管理音频源的池化.
-    /// </summary>
-    public class AudioManager : MonoBehaviour
+    public class AudioManager : MonoBehaviour, IGameSystem
     {
         private static AudioManager _instance;
         private static readonly object _lock = new object();
@@ -45,6 +44,11 @@ namespace Audio
 
         public static bool HasInstance => _instance != null && !_applicationIsQuitting;
 
+        public int Priority => 1000;
+
+        private const string PoolKey = "AudioSourcePool";
+        private const string PoolConfigPath = "Configs/GameSettingConfig";
+
         [Header("Volume Settings")]
         [SerializeField]
         [Range(0f, 1f)]
@@ -58,17 +62,12 @@ namespace Audio
         [Range(0f, 1f)]
         private float _sfxVolume = 1f;
 
-        [Header("Pool Settings")]
-        [SerializeField]
-        private int _initialPoolSize = 10;
-
-        [SerializeField]
-        private int _maxPoolSize = 30;
-
         private AudioSource _bgmSource;
-        private readonly List<AudioSource> _sfxPool = new List<AudioSource>();
-        private readonly List<AudioSource> _activeSfxSources = new List<AudioSource>();
+        private GameObjectPool _sfxPool;
         private Transform _poolRoot;
+        private List<PooledAudioSource> _activeSources = new List<PooledAudioSource>();
+        private PoolConfig _poolConfig;
+        private GameObject _pooledAudioSourcePrefab;
 
         public float MasterVolume
         {
@@ -114,13 +113,13 @@ namespace Audio
             DontDestroyOnLoad(gameObject);
 
             InitializeBGMSource();
-            InitializeSFXPool();
         }
 
         private void OnDestroy()
         {
             if (_instance == this)
             {
+                CleanupPools();
                 _applicationIsQuitting = true;
             }
         }
@@ -145,22 +144,34 @@ namespace Audio
 
         private void InitializeSFXPool()
         {
+            if (_pooledAudioSourcePrefab == null)
+            {
+                _pooledAudioSourcePrefab = CreatePooledAudioSourcePrefab();
+            }
+
             _poolRoot = new GameObject("[SFX_Pool]").transform;
             _poolRoot.SetParent(transform);
 
-            for (int i = 0; i < _initialPoolSize; i++)
+            if (_poolConfig == null)
             {
-                CreateNewSFXSource();
+                _poolConfig = PoolConfig.Default;
+            }
+
+            if (ObjectPoolManager.Instance != null)
+            {
+                _sfxPool = ObjectPoolManager.Instance.GetOrCreatePool(
+                    PoolKey,
+                    _pooledAudioSourcePrefab,
+                    _poolConfig);
             }
         }
 
-        private AudioSource CreateNewSFXSource()
+        private GameObject CreatePooledAudioSourcePrefab()
         {
-            var source = _poolRoot.gameObject.AddComponent<AudioSource>();
-            source.playOnAwake = false;
-            source.loop = false;
-            _sfxPool.Add(source);
-            return source;
+            var go = new GameObject("PooledAudioSource");
+            var component = go.AddComponent<PooledAudioSource>();
+            go.SetActive(false);
+            return go;
         }
 
         private void UpdateAllVolumes()
@@ -169,51 +180,84 @@ namespace Audio
             {
                 _bgmSource.volume = _masterVolume * _bgmVolume;
             }
-        }
 
-        private void RecycleFinishedSFX()
-        {
-            for (int i = _activeSfxSources.Count - 1; i >= 0; i--)
+            foreach (var source in _activeSources)
             {
-                var source = _activeSfxSources[i];
-                if (source == null || !source.isPlaying)
+                if (source != null && source.IsPlaying)
                 {
-                    if (source != null)
-                    {
-                        source.clip = null;
-                        source.transform.SetParent(_poolRoot);
-                        _sfxPool.Add(source);
-                    }
-                    _activeSfxSources.RemoveAt(i);
+                    source.AudioSource.volume = _masterVolume * _sfxVolume;
                 }
             }
         }
 
-        private AudioSource GetAvailableSFXSource()
+        private void RecycleFinishedSFX()
         {
-            if (_sfxPool.Count > 0)
+            for (int i = _activeSources.Count - 1; i >= 0; i--)
             {
-                var source = _sfxPool[_sfxPool.Count - 1];
-                _sfxPool.RemoveAt(_sfxPool.Count - 1);
-                return source;
+                var source = _activeSources[i];
+                if (source == null || !source.IsPlaying)
+                {
+                    if (source != null && _sfxPool != null)
+                    {
+                        _sfxPool.Release(source.GameObject);
+                    }
+                    _activeSources.RemoveAt(i);
+                }
             }
-
-            if (_activeSfxSources.Count + _sfxPool.Count < _maxPoolSize)
-            {
-                return CreateNewSFXSource();
-            }
-
-            if (_activeSfxSources.Count > 0)
-            {
-                var oldest = _activeSfxSources[0];
-                oldest.Stop();
-                oldest.clip = null;
-                _activeSfxSources.RemoveAt(0);
-                return oldest;
-            }
-
-            return null;
         }
+
+        private PooledAudioSource GetAvailableSFXSource()
+        {
+            if (_sfxPool == null || _pooledAudioSourcePrefab == null)
+            {
+                InitializeSFXPool();
+            }
+
+            var go = _sfxPool.Get();
+            var pooledSource = go.GetComponent<PooledAudioSource>();
+            pooledSource.OnGetFromPool();
+            _activeSources.Add(pooledSource);
+            return pooledSource;
+        }
+
+        #region IGameSystem Implementation
+
+        public void Initialize()
+        {
+            var config = ResourceManager.Load<GameSettingConfig>(PoolConfigPath);
+            if (config == null)
+            {
+                Debug.LogWarning($"[AudioManager] Config not found at Resources/{PoolConfigPath}");
+                _poolConfig = PoolConfig.Default;
+                return;
+            }
+
+            _masterVolume = config.audio.masterVolume;
+            _bgmVolume = config.audio.bgmVolume;
+            _sfxVolume = config.audio.sfxVolume;
+
+            _poolConfig = new PoolConfig
+            {
+                initialSize = config.pool.audioInitialPoolSize,
+                maxSize = config.pool.audioMaxPoolSize,
+                autoExpand = true,
+                autoReleaseOnSceneChange = true
+            };
+
+            InitializeSFXPool();
+            UpdateAllVolumes();
+
+            Debug.Log("[AudioManager] Initialized successfully");
+        }
+
+        public void Shutdown()
+        {
+            StopAll();
+            CleanupPools();
+            Debug.Log("[AudioManager] Shutdown");
+        }
+
+        #endregion
 
         #region BGM Methods
 
@@ -269,17 +313,15 @@ namespace Audio
             var source = GetAvailableSFXSource();
             if (source == null) return null;
 
-            source.clip = clip;
-            source.volume = _masterVolume * _sfxVolume * config.volume;
-            source.pitch = config.pitch;
-            source.loop = config.loop;
-            source.spatialBlend = config.spatialBlend;
-            source.priority = config.priority;
-            source.Play();
+            source.Play(
+                clip,
+                _masterVolume * _sfxVolume * config.volume,
+                config.pitch,
+                config.loop,
+                config.spatialBlend,
+                config.priority);
 
-            _activeSfxSources.Add(source);
-
-            return source;
+            return source.AudioSource;
         }
 
         public AudioSource PlaySFXAtPosition(AudioClip clip, Vector3 position, SoundConfig config = null)
@@ -287,51 +329,42 @@ namespace Audio
             if (clip == null) return null;
 
             config = config ?? SoundConfig.SFX;
-            config.spatialBlend = 1f;
 
             var source = GetAvailableSFXSource();
             if (source == null) return null;
 
-            source.transform.position = position;
-            source.clip = clip;
-            source.volume = _masterVolume * _sfxVolume * config.volume;
-            source.pitch = config.pitch;
-            source.loop = config.loop;
-            source.spatialBlend = config.spatialBlend;
-            source.priority = config.priority;
-            source.Play();
+            source.Transform.position = position;
+            source.Play(
+                clip,
+                _masterVolume * _sfxVolume * config.volume,
+                config.pitch,
+                config.loop,
+                1f,
+                config.priority);
 
-            _activeSfxSources.Add(source);
-
-            return source;
+            return source.AudioSource;
         }
 
         public void StopAllSFX()
         {
-            foreach (var source in _activeSfxSources)
+            foreach (var source in _activeSources)
             {
-                if (source != null)
+                if (source != null && _sfxPool != null)
                 {
-                    source.Stop();
-                    source.clip = null;
-                    source.transform.SetParent(_poolRoot);
-                    _sfxPool.Add(source);
+                    _sfxPool.Release(source.GameObject);
                 }
             }
-            _activeSfxSources.Clear();
+            _activeSources.Clear();
         }
 
-        public void StopSFX(AudioSource source)
+        public void StopSFX(PooledAudioSource source)
         {
-            if (source == null) return;
+            if (source == null || _sfxPool == null) return;
 
-            if (_activeSfxSources.Contains(source))
+            if (_activeSources.Contains(source))
             {
-                source.Stop();
-                source.clip = null;
-                source.transform.SetParent(_poolRoot);
-                _activeSfxSources.Remove(source);
-                _sfxPool.Add(source);
+                _sfxPool.Release(source.GameObject);
+                _activeSources.Remove(source);
             }
         }
 
@@ -348,11 +381,11 @@ namespace Audio
         public void PauseAll()
         {
             PauseBGM();
-            foreach (var source in _activeSfxSources)
+            foreach (var source in _activeSources)
             {
-                if (source != null && source.isPlaying)
+                if (source != null && source.IsPlaying)
                 {
-                    source.Pause();
+                    source.AudioSource.Pause();
                 }
             }
         }
@@ -360,11 +393,11 @@ namespace Audio
         public void ResumeAll()
         {
             ResumeBGM();
-            foreach (var source in _activeSfxSources)
+            foreach (var source in _activeSources)
             {
-                if (source != null && !source.isPlaying)
+                if (source != null && !source.IsPlaying && source.CurrentClip != null)
                 {
-                    source.UnPause();
+                    source.AudioSource.UnPause();
                 }
             }
         }
@@ -372,8 +405,6 @@ namespace Audio
         #endregion
 
         #region Settings
-
-        private const string ConfigPath = "Configs/GameSettingConfig";
 
         public void SetVolumeSettings(float masterVolume, float bgmVolume, float sfxVolume)
         {
@@ -383,24 +414,18 @@ namespace Audio
             UpdateAllVolumes();
         }
 
-        /// <summary>
-        /// 初始化音频管理器
-        /// </summary>  
-        public void Initialize()
+        private void CleanupPools()
         {
-            var config = ResourceManager.Load<GameSettingConfig>(ConfigPath);
-            if (config == null)
+            if (_sfxPool != null)
             {
-                Debug.LogWarning($"[AudioManager] Config not found at Resources/{ConfigPath}");
-                return;
+                _sfxPool.ReleaseAll();
             }
+            _activeSources.Clear();
 
-            _masterVolume = config.audio.masterVolume;
-            _bgmVolume = config.audio.bgmVolume;
-            _sfxVolume = config.audio.sfxVolume;
-            _initialPoolSize = config.pool.audioInitialPoolSize;
-            _maxPoolSize = config.pool.audioMaxPoolSize;
-            UpdateAllVolumes();
+            if (_poolRoot != null)
+            {
+                Destroy(_poolRoot.gameObject);
+            }
         }
 
         #endregion

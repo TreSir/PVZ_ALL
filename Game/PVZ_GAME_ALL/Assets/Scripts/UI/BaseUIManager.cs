@@ -1,137 +1,278 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using ObjectPool;
 
-public class BaseUIManager
+namespace UI
 {
-    private static BaseUIManager _instance;
-    public static BaseUIManager Instance
+    public class BaseUIManager
     {
-        get 
-        { 
-            if (_instance == null)
-            {
-                _instance = new BaseUIManager();
-            }
-            return _instance; 
-        }
-    }
-
-    private Dictionary<string, string> pathDict;
-    private Dictionary<string, GameObject> prefabDict;
-    public Dictionary<string, BasePanel> panelDict;
-    private Transform _uiRoot;
-    public Transform UIRoot
-    {
-        get
+        private static BaseUIManager _instance;
+        public static BaseUIManager Instance
         {
-            if(_uiRoot == null)
+            get
             {
-                if (GameObject.Find("Canvas")) 
+                if (_instance == null)
                 {
-                    _uiRoot = GameObject.Find("Canvas").transform;
+                    _instance = new BaseUIManager();
+                }
+                return _instance;
+            }
+        }
+
+        private Dictionary<string, string> _pathDict;
+        private Dictionary<string, GameObject> _prefabDict;
+        public Dictionary<string, BasePanel> _panelDict;
+        private Dictionary<string, Queue<BasePanel>> _panelPool;
+        private Transform _uiRoot;
+        private GameObject _panelPoolRoot;
+        private const string PoolKey = "UIPanelPool";
+        private bool _usePool = true;
+        private int _initialPoolSize = 5;
+
+        public Transform UIRoot
+        {
+            get
+            {
+                if (_uiRoot == null)
+                {
+                    var canvas = GameObject.Find("Canvas");
+                    if (canvas != null)
+                    {
+                        _uiRoot = canvas.transform;
+                    }
+                    else
+                    {
+                        _uiRoot = new GameObject("Canvas").transform;
+                    }
+                }
+                return _uiRoot;
+            }
+        }
+
+        public int sortingOrder = 1;
+
+        private BaseUIManager()
+        {
+            InitDics();
+        }
+
+        private void InitDics()
+        {
+            _prefabDict = new Dictionary<string, GameObject>();
+            _panelDict = new Dictionary<string, BasePanel>();
+            _panelPool = new Dictionary<string, Queue<BasePanel>>();
+            _pathDict = new Dictionary<string, string>()
+            {
+                {UIConst.MainMenuPanel, "MainMenuPanel"}
+            };
+        }
+
+        public void SetUsePool(bool usePool, int initialPoolSize = 5)
+        {
+            _usePool = usePool;
+            _initialPoolSize = initialPoolSize;
+        }
+
+        public BasePanel OpenPanel(string panelName)
+        {
+            BasePanel panel = null;
+
+            if (_panelDict.TryGetValue(panelName, out panel))
+            {
+                Debug.Log($"[BaseUIManager] Panel {panelName} is already opened");
+                panel.SetActive(true);
+                return panel;
+            }
+
+            if (_usePool && _panelPool.TryGetValue(panelName, out var pool) && pool.Count > 0)
+            {
+                panel = pool.Dequeue();
+                _panelDict[panelName] = panel;
+                panel.transform.SetParent(UIRoot, false);
+                panel.OpenPanel();
+                UpdatePanelSortingOrder(panel.gameObject);
+                return panel;
+            }
+
+            string path = null;
+            if (!_pathDict.TryGetValue(panelName, out path))
+            {
+                Debug.LogWarning($"[BaseUIManager] Panel path not found: {panelName}");
+                return null;
+            }
+
+            GameObject prefab = null;
+            if (!_prefabDict.TryGetValue(panelName, out prefab))
+            {
+                prefab = Resources.Load<GameObject>("Prefabs/UI/" + path);
+                if (prefab == null)
+                {
+                    Debug.LogWarning($"[BaseUIManager] Panel prefab not found: Prefabs/UI/{path}");
+                    return null;
+                }
+                _prefabDict[panelName] = prefab;
+            }
+
+            GameObject panelObject = UnityEngine.Object.Instantiate(prefab, UIRoot, false);
+            panel = panelObject.GetComponent<BasePanel>();
+            if (panel == null)
+            {
+                Debug.LogWarning($"[BaseUIManager] Panel {panelName} does not have BasePanel component");
+                Destroy(panelObject);
+                return null;
+            }
+
+            _panelDict[panelName] = panel;
+            panel.OpenPanel();
+            UpdatePanelSortingOrder(panelObject);
+
+            return panel;
+        }
+
+        private void UpdatePanelSortingOrder(GameObject panelObject)
+        {
+            var canvas = panelObject.GetComponent<UnityEngine.Canvas>();
+            if (canvas != null)
+            {
+                canvas.sortingOrder = sortingOrder;
+                sortingOrder++;
+            }
+        }
+
+        public bool ClosePanel(string panelName, bool wantRemove = true)
+        {
+            if (!_panelDict.TryGetValue(panelName, out var panel))
+            {
+                Debug.LogWarning($"[BaseUIManager] Panel not found: {panelName}");
+                return false;
+            }
+
+            if (wantRemove)
+            {
+                if (_usePool)
+                {
+                    ReturnToPool(panelName, panel);
                 }
                 else
                 {
-                    _uiRoot = new GameObject("Canvas").transform;
+                    panel.ClosePanel();
                 }
             }
-            return _uiRoot;
-        }
-    }
-    public int sortingOrder = 1;
 
-    private BaseUIManager()
-    {
-        InitDics();
-    }
-    private void InitDics()
-    {
-        prefabDict = new Dictionary<string, GameObject>();
-        panelDict = new Dictionary<string, BasePanel>();
-        //这个字典里面需要提前写好所有的panel prefab的路径
-        pathDict = new Dictionary<string, string>()
-        {
-            //格式“{UIConst名字,panelPrefab路径}”,如下
-            {UIConst.MainMenuPanel, "MainMenuPanel"}
-        };
-    }
+            _panelDict.Remove(panelName);
+            return true;
+        }
 
-
-/// <summary>
-/// 打开一个panel，这个方法只管用就行了
-/// </summary>
-/// <param name="panelName"></param>
-/// <returns></returns>
-    public BasePanel OpenPanel(string panelName)
-    {
-        BasePanel panel = null;
-        if(panelDict.TryGetValue(panelName, out panel))
-        {
-                Debug.Log("已打开");
-                return null;
-        }
-        string path = null;
-        if(!pathDict.TryGetValue(panelName, out path))
-        {
-            Debug.Log("不存在该panel path");
-            return null;
-        }
-        GameObject prefab = null;
-        if(!prefabDict.TryGetValue(panelName,out prefab))
-        {
-            prefab = Resources.Load<GameObject>("Prefabs/UI/" + path);
-            prefabDict[panelName] = prefab;
-        }
-        GameObject panelObject = GameObject.Instantiate(prefab, UIRoot, false);
-        panel = panelObject.GetComponent<BasePanel>();
-        panelDict[panelName] = panel;
-        
-        panel.OpenPanel();
-        Canvas panelCavas = panelObject.GetComponent<Canvas>();
-        panelCavas.sortingOrder = sortingOrder;
-        sortingOrder += 1; 
-        return panel;
-    }
-    /// <summary>
-    /// 可以关闭一个panel，这个方法只管用就行了
-    /// 如果想移除panel并注销，就传true
-    /// 如果只是隐藏panel，或者这个panel物体已经没了但是没被注销，就传false
-    /// </summary>
-    /// <param name="panelName"></param>
-    /// <param name="isRemove"></param>
-    /// <returns></returns>
-    public bool ClosePanel(string panelName, bool wantRemove = true)
-    {
-        BasePanel panel = null;
-        if(!panelDict.TryGetValue(panelName,out panel))
-        {
-            Debug.Log("未打开");
-            return false;
-        }
-        if (wantRemove)
+        private void ReturnToPool(string panelName, BasePanel panel)
         {
             panel.ClosePanel();
+
+            if (!_panelPool.TryGetValue(panelName, out var pool))
+            {
+                pool = new Queue<BasePanel>();
+                _panelPool[panelName] = pool;
+            }
+
+            if (_panelPoolRoot == null)
+            {
+                _panelPoolRoot = new GameObject("[UI_Panel_Pool]");
+                UnityEngine.Object.DontDestroyOnLoad(_panelPoolRoot);
+            }
+
+            panel.transform.SetParent(_panelPoolRoot.transform, false);
+            panel.gameObject.SetActive(false);
+            pool.Enqueue(panel);
+
+            Debug.Log($"[BaseUIManager] Panel {panelName} returned to pool. Pool size: {pool.Count}");
         }
-        panelDict.Remove(panelName);
-        return true;
-    }
-    /// <summary>
-    /// 关闭所有panel，只管用就行了，换场景的时候直接用
-    /// </summary>
-    /// <param name="wantRemove"></param>
-    public void CloseAllPanel( bool wantRemove = true)
-    {
-        List<string> panelNames = new List<string>(panelDict.Keys);
-        foreach(var panelName in panelNames)
+
+        public void CloseAllPanel(bool wantRemove = true)
         {
-            ClosePanel(panelName, wantRemove);
+            var panelNames = new List<string>(_panelDict.Keys);
+            foreach (var panelName in panelNames)
+            {
+                ClosePanel(panelName, wantRemove);
+            }
+        }
+
+        public void OnPanelClosed(string panelName)
+        {
+        }
+
+        public bool IsPanelOpened(string panelName)
+        {
+            return _panelDict.ContainsKey(panelName);
+        }
+
+        public BasePanel GetPanel(string panelName)
+        {
+            if (_panelDict.TryGetValue(panelName, out var panel))
+            {
+                return panel;
+            }
+            return null;
+        }
+
+        public void PreloadPanel(string panelName)
+        {
+            if (!_pathDict.ContainsKey(panelName))
+            {
+                Debug.LogWarning($"[BaseUIManager] Panel path not found for preload: {panelName}");
+                return;
+            }
+
+            if (!_prefabDict.TryGetValue(panelName, out var prefab))
+            {
+                var path = _pathDict[panelName];
+                prefab = Resources.Load<GameObject>("Prefabs/UI/" + path);
+                if (prefab != null)
+                {
+                    _prefabDict[panelName] = prefab;
+                }
+            }
+
+            if (!_panelPool.ContainsKey(panelName))
+            {
+                _panelPool[panelName] = new Queue<BasePanel>();
+            }
+
+            var pool = _panelPool[panelName];
+            for (int i = 0; i < _initialPoolSize; i++)
+            {
+                var panelObj = UnityEngine.Object.Instantiate(prefab, _panelPoolRoot.transform, false);
+                var panel = panelObj.GetComponent<BasePanel>();
+                if (panel != null)
+                {
+                    panelObj.SetActive(false);
+                    pool.Enqueue(panel);
+                }
+                else
+                {
+                    Destroy(panelObj);
+                }
+            }
+
+            Debug.Log($"[BaseUIManager] Preloaded {panelName}, count: {pool.Count}");
+        }
+
+        public void ClearPool()
+        {
+            foreach (var pool in _panelPool.Values)
+            {
+                pool.Clear();
+            }
+            _panelPool.Clear();
+
+            if (_panelPoolRoot != null)
+            {
+                Destroy(_panelPoolRoot);
+                _panelPoolRoot = null;
+            }
         }
     }
 
-}
-public class UIConst
-{
-    //这个里面需要提前配置好所有的panel的名字，如下：
-    public const string MainMenuPanel = "MainMenuPanel";
+    public class UIConst
+    {
+        public const string MainMenuPanel = "MainMenuPanel";
+    }
 }
