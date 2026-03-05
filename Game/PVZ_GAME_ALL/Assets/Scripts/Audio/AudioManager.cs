@@ -2,12 +2,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using Config;
 using SourceLoad;
-using Core;
 using ObjectPool;
 
 namespace Audio
 {
-    public class AudioManager : MonoBehaviour, IGameSystem
+    public class AudioManager : MonoBehaviour
     {
         private static AudioManager _instance;
         private static readonly object _lock = new object();
@@ -44,8 +43,6 @@ namespace Audio
 
         public static bool HasInstance => _instance != null && !_applicationIsQuitting;
 
-        public int Priority => 1000;
-
         private const string PoolKey = "AudioSourcePool";
         private const string PoolConfigPath = "Configs/GameSettingConfig";
 
@@ -68,6 +65,7 @@ namespace Audio
         private List<PooledAudioSource> _activeSources = new List<PooledAudioSource>();
         private PoolConfig _poolConfig;
         private GameObject _pooledAudioSourcePrefab;
+        private bool _isInitialized;
 
         public float MasterVolume
         {
@@ -185,7 +183,7 @@ namespace Audio
             {
                 if (source != null && source.IsPlaying)
                 {
-                    source.AudioSource.volume = _masterVolume * _sfxVolume;
+                    source.AudioSourceComponent.volume = _masterVolume * _sfxVolume;
                 }
             }
         }
@@ -220,36 +218,50 @@ namespace Audio
             return pooledSource;
         }
 
-        #region IGameSystem Implementation
+        #region Public Methods
 
+        /// <summary>
+        /// 初始化音频管理器
+        /// </summary>
         public void Initialize()
         {
+            if (_isInitialized)
+            {
+                Debug.LogWarning("[AudioManager] Already initialized");
+                return;
+            }
+
             var config = ResourceManager.Load<GameSettingConfig>(PoolConfigPath);
             if (config == null)
             {
                 Debug.LogWarning($"[AudioManager] Config not found at Resources/{PoolConfigPath}");
                 _poolConfig = PoolConfig.Default;
-                return;
             }
-
-            _masterVolume = config.audio.masterVolume;
-            _bgmVolume = config.audio.bgmVolume;
-            _sfxVolume = config.audio.sfxVolume;
-
-            _poolConfig = new PoolConfig
+            else
             {
-                initialSize = config.pool.audioInitialPoolSize,
-                maxSize = config.pool.audioMaxPoolSize,
-                autoExpand = true,
-                autoReleaseOnSceneChange = true
-            };
+                _masterVolume = config.audio.masterVolume;
+                _bgmVolume = config.audio.bgmVolume;
+                _sfxVolume = config.audio.sfxVolume;
+
+                _poolConfig = new PoolConfig
+                {
+                    initialSize = config.pool.audioInitialPoolSize,
+                    maxSize = config.pool.audioMaxPoolSize,
+                    autoExpand = true,
+                    autoReleaseOnSceneChange = true
+                };
+            }
 
             InitializeSFXPool();
             UpdateAllVolumes();
+            _isInitialized = true;
 
             Debug.Log("[AudioManager] Initialized successfully");
         }
 
+        /// <summary>
+        /// 关闭音频管理器
+        /// </summary>
         public void Shutdown()
         {
             StopAll();
@@ -321,7 +333,7 @@ namespace Audio
                 config.spatialBlend,
                 config.priority);
 
-            return source.AudioSource;
+            return source.AudioSourceComponent;
         }
 
         public AudioSource PlaySFXAtPosition(AudioClip clip, Vector3 position, SoundConfig config = null)
@@ -342,7 +354,7 @@ namespace Audio
                 1f,
                 config.priority);
 
-            return source.AudioSource;
+            return source.AudioSourceComponent;
         }
 
         public void StopAllSFX()
@@ -385,7 +397,7 @@ namespace Audio
             {
                 if (source != null && source.IsPlaying)
                 {
-                    source.AudioSource.Pause();
+                    source.AudioSourceComponent.Pause();
                 }
             }
         }
@@ -397,7 +409,7 @@ namespace Audio
             {
                 if (source != null && !source.IsPlaying && source.CurrentClip != null)
                 {
-                    source.AudioSource.UnPause();
+                    source.AudioSourceComponent.UnPause();
                 }
             }
         }

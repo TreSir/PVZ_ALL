@@ -155,6 +155,10 @@ namespace ObjectPool
             }
         }
 
+
+        /// <summary>
+        /// 释放所有活动对象
+        /// </summary>
         public void ReleaseAll()
         {
             for (int i = _activeObjects.Count - 1; i >= 0; i--)

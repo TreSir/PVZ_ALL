@@ -1,4 +1,4 @@
-namespace Core
+namespace GameBase
 {
     public interface IGameSystem
     {

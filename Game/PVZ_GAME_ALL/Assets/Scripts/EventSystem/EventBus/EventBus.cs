@@ -4,10 +4,9 @@ using System.Threading;
 
 namespace EventBus
 {
-    public interface IEvent { }
-
     public interface IEventHandler
     {
+        int Priority { get; }
         void Handle(IEvent e);
     }
 
@@ -68,7 +67,7 @@ namespace EventBus
                 {
                     for (int i = handlers.Count - 1; i >= 0; i--)
                     {
-                        if (handlers[i] is EventHandler<T> typedHandler && typedHandler.Handle != null)
+                        if (handlers[i] is EventHandler<T>)
                         {
                             handlers.RemoveAt(i);
                             break;

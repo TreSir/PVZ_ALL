@@ -6,10 +6,21 @@ namespace Audio
     public class PooledAudioSource : MonoBehaviour, IGameObjectPoolObject
     {
         private AudioSource _audioSource;
-        private AudioSource AudioSource => _audioSource != null ? _audioSource : (_audioSource = gameObject.AddComponent<AudioSource>());
 
-        public bool IsPlaying => AudioSource != null && AudioSource.isPlaying;
-        public AudioClip CurrentClip => AudioSource?.clip;
+        public AudioSource AudioSourceComponent
+        {
+            get
+            {
+                if (_audioSource == null)
+                {
+                    _audioSource = gameObject.AddComponent<AudioSource>();
+                }
+                return _audioSource;
+            }
+        }
+
+        public bool IsPlaying => AudioSourceComponent != null && AudioSourceComponent.isPlaying;
+        public AudioClip CurrentClip => AudioSourceComponent?.clip;
 
         public GameObject GameObject => gameObject;
         public Transform Transform => transform;
@@ -17,14 +28,14 @@ namespace Audio
         public void OnGetFromPool()
         {
             gameObject.SetActive(true);
-            AudioSource.playOnAwake = false;
-            AudioSource.loop = false;
+            AudioSourceComponent.playOnAwake = false;
+            AudioSourceComponent.loop = false;
         }
 
         public void OnReleaseToPool()
         {
-            AudioSource.Stop();
-            AudioSource.clip = null;
+            AudioSourceComponent.Stop();
+            AudioSourceComponent.clip = null;
             gameObject.SetActive(false);
         }
 
@@ -35,18 +46,18 @@ namespace Audio
 
         public void Play(AudioClip clip, float volume, float pitch, bool loop, float spatialBlend, int priority)
         {
-            AudioSource.clip = clip;
-            AudioSource.volume = volume;
-            AudioSource.pitch = pitch;
-            AudioSource.loop = loop;
-            AudioSource.spatialBlend = spatialBlend;
-            AudioSource.priority = priority;
-            AudioSource.Play();
+            AudioSourceComponent.clip = clip;
+            AudioSourceComponent.volume = volume;
+            AudioSourceComponent.pitch = pitch;
+            AudioSourceComponent.loop = loop;
+            AudioSourceComponent.spatialBlend = spatialBlend;
+            AudioSourceComponent.priority = priority;
+            AudioSourceComponent.Play();
         }
 
         public void Stop()
         {
-            AudioSource.Stop();
+            AudioSourceComponent.Stop();
         }
     }
 }

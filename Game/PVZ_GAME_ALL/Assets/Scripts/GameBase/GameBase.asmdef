@@ -1,9 +1,7 @@
 {
-    "name": "Core",
-    "rootNamespace": "Core",
-    "references": [
-        "GameBase"
-    ],
+    "name": "GameBase",
+    "rootNamespace": "GameBase",
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

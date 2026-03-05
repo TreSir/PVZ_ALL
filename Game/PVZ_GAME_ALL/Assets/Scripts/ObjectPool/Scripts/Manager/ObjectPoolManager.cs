@@ -107,6 +107,12 @@ namespace ObjectPool
             _applicationIsQuitting = true;
         }
 
+
+        /// <summary>
+        /// 当场景加载时，根据配置自动释放所有池中的对象
+        /// </summary>
+        /// <param name="scene">加载的场景</param>
+        /// <param name="mode">加载场景的模式</param>
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             foreach (var kvp in _poolConfigs)

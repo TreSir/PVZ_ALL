@@ -118,7 +118,7 @@ namespace UI
             if (panel == null)
             {
                 Debug.LogWarning($"[BaseUIManager] Panel {panelName} does not have BasePanel component");
-                Destroy(panelObject);
+                UnityEngine.Object.Destroy(panelObject);
                 return null;
             }
 
@@ -248,7 +248,7 @@ namespace UI
                 }
                 else
                 {
-                    Destroy(panelObj);
+                    UnityEngine.Object.Destroy(panelObj);
                 }
             }
 
@@ -265,7 +265,7 @@ namespace UI
 
             if (_panelPoolRoot != null)
             {
-                Destroy(_panelPoolRoot);
+                UnityEngine.Object.Destroy(_panelPoolRoot);
                 _panelPoolRoot = null;
             }
         }

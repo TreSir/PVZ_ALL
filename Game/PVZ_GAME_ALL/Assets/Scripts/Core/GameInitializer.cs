@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using GameBase;
 
 namespace Core
 {
@@ -44,6 +45,8 @@ namespace Core
         }
 
         public static bool HasInstance => _instance != null && !_applicationIsQuitting;
+
+        public int SystemCount => _systems.Count;
 
         private void Awake()
         {
