@@ -16,6 +16,7 @@ MonoBehaviour:
     masterVolume: 0.459
     bgmVolume: 0.824
     sfxVolume: 0.6
+    startupBGMPath: Audio/BGM/B_002
   pool:
     audioInitialPoolSize: 15
     audioMaxPoolSize: 30

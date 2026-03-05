@@ -2,331 +2,408 @@
 
 ## 概述
 
-Audio 模块负责游戏中所有音频的播放和管理，包括背景音乐（BGM）和音效（SFX）。该模块使用对象池技术优化 AudioSource 的创建和销毁，并实现了 `IGameSystem` 接口以支持自动初始化。
+Audio 模块负责游戏中所有音频的播放和管理，包括背景音乐（BGM）和音效（SFX）。该模块采用**包装器模式**，通过 `AudioSystem` 实现 `IGameSystem` 接口，由 `GameInitializer` 自动发现和初始化。
 
-## 主要功能
+## 架构设计
 
-- 🎵 背景音乐播放（支持循环、音量调节）
-- 🔊 音效播放（支持3D音效、同时播放多个）
-- 🏊 对象池管理（复用 AudioSource，减少 GC）
-- ⚙️ 配置驱动（通过 ScriptableObject 配置）
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    GameInitializer                          │
+│                  (自动发现 IGameSystem)                      │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      AudioSystem                            │
+│              (IGameSystem, Priority: 1000)                  │
+│                                                             │
+│  Initialize() ──► AudioManager.Instance.Initialize()        │
+│  Shutdown()  ──► AudioManager.Instance.Shutdown()           │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     AudioManager                            │
+│              (MonoBehaviour 单例)                           │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │  BGM 播放   │  │  SFX 播放   │  │  ObjectPool 管理    │ │
+│  │  (单声道)   │  │  (池化)     │  │  (AudioSource)      │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## 配置说明
 
-### 创建音频配置
+### GameSettingConfig 配置
 
-1. 在 `Resources/Configs/` 目录下创建 `GameSettingConfig.asset`
-2. 配置音频参数：
-
-```csharp
-// GameSettingConfig.asset
-Audio Settings:
-- Master Volume: 1.0      // 主音量 (0-1)
-- BGM Volume: 0.8         // 背景音乐音量 (0-1)
-- SFX Volume: 1.0         // 音效音量 (0-1)
-
-Pool Settings:
-- Audio Initial Pool Size: 10   // 初始池大小
-- Audio Max Pool Size: 30        // 最大池大小
-```
-
-## 基础使用
-
-### 获取实例
+**位置：** `Resources/Configs/GameSettingConfig.asset`
 
 ```csharp
-// 通过单例获取（推荐）
-AudioManager audioManager = AudioManager.Instance;
-
-// 检查实例是否有效
-if (AudioManager.HasInstance)
+[Header("Audio Settings")]
+public class AudioSettings
 {
-    // 使用音频管理器
+    [Tooltip("主音量 (0-1)")]
+    [Range(0f, 1f)]
+    public float masterVolume = 1f;
+
+    [Tooltip("背景音乐音量 (0-1)")]
+    [Range(0f, 1f)]
+    public float bgmVolume = 1f;
+
+    [Tooltip("音效音量 (0-1)")]
+    [Range(0f, 1f)]
+    public float sfxVolume = 1f;
+
+    [Tooltip("游戏启动时播放的背景音乐路径")]
+    public string startupBGMPath = "Audio/BGM/B_001";
+}
+
+[Header("Pool Settings")]
+public class PoolSettings
+{
+    [Tooltip("AudioSource 池初始大小")]
+    [Min(1)]
+    public int audioInitialPoolSize = 10;
+
+    [Tooltip("AudioSource 池最大大小")]
+    [Min(1)]
+    public int audioMaxPoolSize = 30;
 }
 ```
+
+---
+
+## 游戏启动流程
+
+```
+游戏启动
+    │
+    ▼
+GameInitializer.Awake()
+    │
+    ▼
+AudioSystem.Initialize() (Priority: 1000)
+    │
+    ▼
+AudioManager.Instance (自动创建单例)
+    │
+    ├─► new GameObject("[AudioManager]")
+    ├─► AddComponent<AudioManager>()
+    └─► DontDestroyOnLoad()
+    │
+    ▼
+AudioManager.Initialize()
+    │
+    ├─► 加载 GameSettingConfig
+    ├─► 设置音量 (masterVolume, bgmVolume, sfxVolume)
+    ├─► 初始化 AudioSource 对象池
+    │
+    └─► 播放启动 BGM (startupBGMPath)
+        │
+        ▼
+    [AudioManager] Playing startup BGM: Audio/BGM/B_001
+```
+
+---
+
+## 基础使用
 
 ### 播放背景音乐
 
 ```csharp
-// 加载并播放 BGM
-AudioClip bgmClip = Resources.Load<AudioClip>("Audio/BGM_MainMenu");
-AudioManager.Instance.PlayBGM(bgmClip);
+using UnityEngine;
+using Audio;
 
-// 使用默认配置播放
-AudioManager.Instance.PlayBGM(bgmClip, SoundConfig.BGM);
-
-// 使用自定义配置播放
-var config = new SoundConfig
+public class GameExample : MonoBehaviour
 {
-    volume = 0.8f,
-    pitch = 1.0f,
-    loop = true,
-    spatialBlend = 0f,
-    priority = 128
-};
-AudioManager.Instance.PlayBGM(bgmClip, config);
+    public void PlayMainMenuBGM()
+    {
+        var clip = Resources.Load<AudioClip>("Audio/BGM/MainMenu");
+        if (clip != null)
+        {
+            AudioManager.Instance.PlayBGM(clip);
+        }
+    }
 
-// 停止 BGM
-AudioManager.Instance.StopBGM();
+    public void PlayGameBGM()
+    {
+        var clip = Resources.Load<AudioClip>("Audio/BGM/GameLevel");
+        if (clip != null)
+        {
+            AudioManager.Instance.PlayBGM(clip);
+        }
+    }
 
-// 暂停/恢复
-AudioManager.Instance.PauseBGM();
-AudioManager.Instance.ResumeBGM();
+    public void StopBGM()
+    {
+        AudioManager.Instance.StopBGM();
+    }
 
-// 检查 BGM 是否在播放
-bool isPlaying = AudioManager.Instance.IsBGMPlaying;
+    public void PauseBGM()
+    {
+        AudioManager.Instance.PauseBGM();
+    }
+
+    public void ResumeBGM()
+    {
+        AudioManager.Instance.ResumeBGM();
+    }
+}
 ```
 
 ### 播放音效
 
 ```csharp
-// 加载并播放音效
-AudioClip sfxClip = Resources.Load<AudioClip>("Audio/SE_Click");
-AudioManager.Instance.PlaySFX(sfxClip);
+using UnityEngine;
+using Audio;
 
-// 使用自定义配置
-var config = new SoundConfig
+public class PlayerController : MonoBehaviour
 {
-    volume = 1.0f,
-    pitch = 1.0f,
-    loop = false,
-    spatialBlend = 0f,
-    priority = 128
-};
-AudioManager.Instance.PlaySFX(sfxClip, config);
+    public AudioClip jumpClip;
+    public AudioClip attackClip;
+    public AudioClip hitClip;
 
-// 播放 3D 音效（指定位置）
-AudioManager.Instance.PlaySFXAtPosition(sfxClip, new Vector3(10, 0, 5));
+    public void OnJump()
+    {
+        if (jumpClip != null)
+        {
+            AudioManager.Instance.PlaySFX(jumpClip);
+        }
+    }
 
-// 停止所有 SFX
-AudioManager.Instance.StopAllSFX();
+    public void OnAttack()
+    {
+        if (attackClip != null)
+        {
+            AudioManager.Instance.PlaySFX(attackClip);
+        }
+    }
 
-// 停止特定音效
-// 需要保存 PlaySFX 的返回值
-AudioSource playingSource = AudioManager.Instance.PlaySFX(sfxClip);
-AudioManager.Instance.StopSFX(playingSource);
+    public void OnHit(Vector3 position)
+    {
+        if (hitClip != null)
+        {
+            // 播放 3D 音效（指定位置）
+            AudioManager.Instance.PlaySFXAtPosition(hitClip, position);
+        }
+    }
+}
 ```
 
-### 播放 3D 音效
-
-```csharp
-// 3D 音效会自动根据位置调整音量和平移
-// spatialBlend 默认为 0（2D音效），设置为 1 为完全 3D
-
-var config = new SoundConfig
-{
-    volume = 1.0f,
-    pitch = 1.0f,
-    loop = false,
-    spatialBlend = 1f,  // 完全 3D
-    priority = 128
-};
-AudioManager.Instance.PlaySFXAtPosition(sfxClip, transform.position, config);
-```
+---
 
 ## 音量控制
 
 ### 单独控制音量
 
 ```csharp
-// 设置各个音量（值范围 0-1）
-AudioManager.Instance.MasterVolume = 0.8f;  // 主音量
-AudioManager.Instance.BGMVolume = 0.6f;     // BGM 音量
-AudioManager.Instance.SFXVolume = 1.0f;     // SFX 音量
+using Audio;
 
-// 获取当前音量
-float master = AudioManager.Instance.MasterVolume;
-float bgm = AudioManager.Instance.BGMVolume;
-float sfx = AudioManager.Instance.SFXVolume;
+public class SettingsMenu : MonoBehaviour
+{
+    public void SetMasterVolume(float value)
+    {
+        AudioManager.Instance.MasterVolume = value;  // 0-1
+    }
+
+    public void SetBGMVolume(float value)
+    {
+        AudioManager.Instance.BGMVolume = value;  // 0-1
+    }
+
+    public void SetSFXVolume(float value)
+    {
+        AudioManager.Instance.SFXVolume = value;  // 0-1
+    }
+
+    public float GetMasterVolume() => AudioManager.Instance.MasterVolume;
+    public float GetBGMVolume() => AudioManager.Instance.BGMVolume;
+    public float GetSFXVolume() => AudioManager.Instance.SFXVolume;
+}
 ```
 
 ### 批量设置音量
 
 ```csharp
-AudioManager.Instance.SetVolumeSettings(
-    masterVolume: 0.8f,
-    bgmVolume: 0.6f,
-    sfxVolume: 1.0f
-);
-```
+using Audio;
 
-### 淡入淡出效果
-
-```csharp
-using System.Collections;
-
-public class AudioFadeExample : MonoBehaviour
+public class AudioSettings : MonoBehaviour
 {
-    public AudioClip newBGM;
-
-    public IEnumerator FadeOutBGM(float duration)
+    public void ApplySettings(float master, float bgm, float sfx)
     {
-        float startVolume = AudioManager.Instance.BGMVolume;
-        float timer = 0f;
-
-        while (timer < duration)
-        {
-            timer += Time.deltaTime;
-            AudioManager.Instance.BGMVolume = Mathf.Lerp(startVolume, 0f, timer / duration);
-            yield return null;
-        }
-
-        AudioManager.Instance.StopBGM();
-        AudioManager.Instance.BGMVolume = startVolume;
-    }
-
-    public IEnumerator FadeInBGM(float duration)
-    {
-        AudioManager.Instance.PlayBGM(newBGM);
-        float targetVolume = AudioManager.Instance.BGMVolume;
-        AudioManager.Instance.BGMVolume = 0f;
-
-        float timer = 0f;
-        while (timer < duration)
-        {
-            timer += Time.deltaTime;
-            AudioManager.Instance.BGMVolume = Mathf.Lerp(0f, targetVolume, timer / duration);
-            yield return null;
-        }
-
-        AudioManager.Instance.BGMVolume = targetVolume;
+        AudioManager.Instance.SetVolumeSettings(master, bgm, sfx);
     }
 }
 ```
 
-## 全局控制
+---
 
-```csharp
-// 暂停所有音频
-AudioManager.Instance.PauseAll();
+## 高级功能
 
-// 恢复所有音频
-AudioManager.Instance.ResumeAll();
-
-// 停止所有音频
-AudioManager.Instance.StopAll();
-```
-
-## SoundConfig 配置说明
-
-```csharp
-public struct SoundConfig
-{
-    /// <summary>音量 (0-1)</summary>
-    public float volume;
-
-    /// <summary>音调 (0.5-2.0, 1.0 为正常)</summary>
-    public float pitch;
-
-    /// <summary>是否循环</summary>
-    public bool loop;
-
-    /// <summary>空间混合 (0 = 2D, 1 = 3D)</summary>
-    public float spatialBlend;
-
-    /// <summary>优先级 (0 = 最高, 256 = 默认)</summary>
-    public int priority;
-}
-```
-
-### 默认配置
-
-```csharp
-// BGM 默认配置
-SoundConfig.BGM = new SoundConfig
-{
-    volume = 1.0f,
-    pitch = 1.0f,
-    loop = true,
-    spatialBlend = 0f,
-    priority = 128
-};
-
-// SFX 默认配置
-SoundConfig.SFX = new SoundConfig
-{
-    volume = 1.0f,
-    pitch = 1.0f,
-    loop = false,
-    spatialBlend = 0f,
-    priority = 128
-};
-```
-
-## 与 Core 模块集成
-
-AudioManager 实现了 `IGameSystem` 接口，会被 GameInitializer 自动发现和初始化。
-
-```csharp
-// AudioManager 的初始化是自动的，无需手动调用
-// 但如果需要手动初始化：
-
-AudioManager.Instance.Initialize();
-
-// 初始化会：
-// 1. 加载 GameSettingConfig
-// 2. 设置音量
-// 3. 初始化对象池
-```
-
-## 注意事项
-
-1. **Resources 路径**：音频文件必须放在 `Resources/Audio/` 目录下
-2. **对象池**：SFX 使用对象池管理，无需手动释放
-3. **场景切换**：切换场景时池会自动释放（可在配置中关闭）
-4. **Null 检查**：播放前务必检查 AudioClip 是否为 null
-5. **事件系统**：建议结合 EventBus 使用，在特定事件触发音效
-
-## 完整示例
+### 使用 SoundConfig 自定义播放
 
 ```csharp
 using UnityEngine;
 using Audio;
 
-public class AudioExample : MonoBehaviour
+public class AdvancedAudioExample : MonoBehaviour
 {
-    private void Start()
+    public AudioClip specialSFX;
+
+    public void PlaySpecialSound()
     {
-        // 播放背景音乐
-        var bgm = Resources.Load<AudioClip>("Audio/BGM_Game");
-        if (bgm != null)
+        var config = new SoundConfig
         {
-            AudioManager.Instance.PlayBGM(bgm);
-        }
+            volume = 0.8f,
+            pitch = 1.2f,        // 音调
+            loop = false,
+            spatialBlend = 0f,   // 0=2D, 1=3D
+            priority = 128       // 优先级 (0=最高)
+        };
+
+        AudioManager.Instance.PlaySFX(specialSFX, config);
     }
 
-    private void Update()
+    public void Play3DSound(Vector3 position)
     {
-        // 按空格播放音效
-        if (Input.GetKeyDown(KeyCode.Space))
+        var config = new SoundConfig
         {
-            PlayClickSound();
-        }
+            volume = 1.0f,
+            pitch = 1.0f,
+            loop = false,
+            spatialBlend = 1f,   // 完全 3D
+            priority = 128
+        };
 
-        // 按 ESC 暂停/恢复
-        if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            if (Time.timeScale == 0)
-                AudioManager.Instance.ResumeAll();
-            else
-                AudioManager.Instance.PauseAll();
-        }
-    }
-
-    private void PlayClickSound()
-    {
-        var clip = Resources.Load<AudioClip>("Audio/SE_Click");
-        if (clip != null)
-        {
-            AudioManager.Instance.PlaySFX(clip);
-        }
+        AudioManager.Instance.PlaySFXAtPosition(specialSFX, position, config);
     }
 }
 ```
 
+### 全局控制
+
+```csharp
+using Audio;
+
+public class PauseManager : MonoBehaviour
+{
+    public void PauseGame()
+    {
+        Time.timeScale = 0f;
+        AudioManager.Instance.PauseAll();  // 暂停所有音频
+    }
+
+    public void ResumeGame()
+    {
+        Time.timeScale = 1f;
+        AudioManager.Instance.ResumeAll();  // 恢复所有音频
+    }
+
+    public void StopAllAudio()
+    {
+        AudioManager.Instance.StopAll();  // 停止所有音频
+    }
+}
+```
+
+---
+
+## 与 EventBus 集成
+
+```csharp
+using UnityEngine;
+using Audio;
+using EventBus;
+
+// 定义音频事件
+public struct PlaySFXEvent : IEvent
+{
+    public string ClipPath;
+    public Vector3 Position;
+}
+
+public class AudioEventSystem : MonoBehaviour
+{
+    private void OnEnable()
+    {
+        EventBus.Subscribe<PlaySFXEvent>(OnPlaySFX);
+    }
+
+    private void OnDisable()
+    {
+        EventBus.Unsubscribe<PlaySFXEvent>(OnPlaySFX);
+    }
+
+    private void OnPlaySFX(PlaySFXEvent e)
+    {
+        var clip = Resources.Load<AudioClip>(e.ClipPath);
+        if (clip != null)
+        {
+            if (e.Position != Vector3.zero)
+            {
+                AudioManager.Instance.PlaySFXAtPosition(clip, e.Position);
+            }
+            else
+            {
+                AudioManager.Instance.PlaySFX(clip);
+            }
+        }
+    }
+}
+
+// 使用示例
+public class Enemy : MonoBehaviour
+{
+    public void OnDeath()
+    {
+        EventBus.Publish(new PlaySFXEvent
+        {
+            ClipPath = "Audio/SE/EnemyDeath",
+            Position = transform.position
+        });
+    }
+}
+```
+
+---
+
+## 目录结构
+
+```
+Resources/
+└── Audio/
+    ├── BGM/
+    │   ├── B_001.mp3      ← 启动 BGM (配置中指定)
+    │   ├── MainMenu.mp3
+    │   └── GameLevel.mp3
+    │
+    └── SE/
+        ├── Click.mp3
+        ├── Jump.mp3
+        └── Attack.mp3
+```
+
+---
+
+## 注意事项
+
+1. **Resources 路径**：音频文件必须放在 `Resources/Audio/` 目录下
+2. **对象池**：SFX 使用对象池管理，无需手动释放
+3. **启动 BGM**：在 `GameSettingConfig` 中配置 `startupBGMPath`
+4. **单例访问**：使用 `AudioManager.Instance` 访问
+5. **空值检查**：播放前务必检查 AudioClip 是否为 null
+
+---
+
 ## 相关文件
 
-- [AudioManager.cs](../Audio/AudioManager.cs) - 音频管理器实现
-- [PooledAudioSource.cs](../Audio/PooledAudioSource.cs) - 池化音频源
-- [SoundConfig.cs](../Audio/SoundConfig.cs) - 音效配置
-- [GameSettingConfig.cs](../Data/Config/GameSettingConfig.cs) - 游戏配置
+| 文件 | 说明 |
+|------|------|
+| [AudioSystem.cs](../Audio/AudioSystem.cs) | IGameSystem 包装器 |
+| [AudioManager.cs](../Audio/AudioManager.cs) | 音频管理器实现 |
+| [PooledAudioSource.cs](../Audio/PooledAudioSource.cs) | 池化音频源 |
+| [SoundConfig.cs](../Audio/SoundConfig.cs) | 音效配置结构 |
+| [GameSettingConfig.cs](../Data/Config/GameSettingConfig.cs) | 游戏配置 |

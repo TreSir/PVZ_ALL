@@ -1,10 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ObjectPool;
+using GameBase;
+using Config;
+using SourceLoad;
 
 namespace UI
 {
-    public class BaseUIManager
+    public class BaseUIManager : IGameSystem
     {
         private static BaseUIManager _instance;
         public static BaseUIManager Instance
@@ -19,15 +22,19 @@ namespace UI
             }
         }
 
+        public int Priority => 2000;
+
+        private const string ConfigPath = "Configs/GameSettingConfig";
+
         private Dictionary<string, string> _pathDict;
         private Dictionary<string, GameObject> _prefabDict;
         public Dictionary<string, BasePanel> _panelDict;
         private Dictionary<string, Queue<BasePanel>> _panelPool;
         private Transform _uiRoot;
         private GameObject _panelPoolRoot;
-        private const string PoolKey = "UIPanelPool";
         private bool _usePool = true;
         private int _initialPoolSize = 5;
+        private bool _isInitialized;
 
         public Transform UIRoot
         {
@@ -51,8 +58,13 @@ namespace UI
 
         public int sortingOrder = 1;
 
-        private BaseUIManager()
+        public BaseUIManager()
         {
+            if (_instance != null && _instance != this)
+            {
+                return;
+            }
+            _instance = this;
             InitDics();
         }
 
@@ -72,6 +84,87 @@ namespace UI
             _usePool = usePool;
             _initialPoolSize = initialPoolSize;
         }
+
+        #region IGameSystem Implementation
+
+        public void Initialize()
+        {
+            if (_isInitialized)
+            {
+                Debug.LogWarning("[BaseUIManager] Already initialized");
+                return;
+            }
+
+            Debug.Log("[BaseUIManager] Initializing...");
+
+            var config = ResourceManager.Load<GameSettingConfig>(ConfigPath);
+            if (config == null)
+            {
+                Debug.LogWarning($"[BaseUIManager] Config not found at Resources/{ConfigPath}");
+                OpenDefaultPanel();
+                _isInitialized = true;
+                return;
+            }
+
+            if (config.ui.enablePanelPool)
+            {
+                _usePool = true;
+                _initialPoolSize = config.ui.panelPoolInitialSize;
+            }
+
+            if (!string.IsNullOrEmpty(config.ui.startupPanelName))
+            {
+                OpenStartupPanel(config.ui.startupPanelName);
+            }
+
+            _isInitialized = true;
+            Debug.Log("[BaseUIManager] Initialized successfully");
+        }
+
+        public void Shutdown()
+        {
+            Debug.Log("[BaseUIManager] Shutting down...");
+            
+            if (!Application.isPlaying)
+            {
+                _panelDict?.Clear();
+                _panelPool?.Clear();
+                _panelPoolRoot = null;
+                _isInitialized = false;
+                return;
+            }
+            
+            CloseAllPanel();
+            ClearPool();
+            _isInitialized = false;
+        }
+
+        private void OpenStartupPanel(string panelName)
+        {
+            var panel = OpenPanel(panelName);
+            if (panel != null)
+            {
+                Debug.Log($"[BaseUIManager] Opened startup panel: {panelName}");
+            }
+            else
+            {
+                Debug.LogWarning($"[BaseUIManager] Failed to open startup panel: {panelName}");
+                OpenDefaultPanel();
+            }
+        }
+
+        private void OpenDefaultPanel()
+        {
+            var panel = OpenPanel(UIConst.MainMenuPanel);
+            if (panel != null)
+            {
+                Debug.Log($"[BaseUIManager] Opened default panel: {UIConst.MainMenuPanel}");
+            }
+        }
+
+        #endregion
+
+        #region Panel Management
 
         public BasePanel OpenPanel(string panelName)
         {
@@ -147,13 +240,19 @@ namespace UI
                 return false;
             }
 
+            if (panel == null)
+            {
+                _panelDict.Remove(panelName);
+                return false;
+            }
+
             if (wantRemove)
             {
-                if (_usePool)
+                if (_usePool && panel.gameObject != null)
                 {
                     ReturnToPool(panelName, panel);
                 }
-                else
+                else if (panel.gameObject != null)
                 {
                     panel.ClosePanel();
                 }
@@ -165,6 +264,11 @@ namespace UI
 
         private void ReturnToPool(string panelName, BasePanel panel)
         {
+            if (panel == null || panel.gameObject == null)
+            {
+                return;
+            }
+
             panel.ClosePanel();
 
             if (!_panelPool.TryGetValue(panelName, out var pool))
@@ -188,10 +292,23 @@ namespace UI
 
         public void CloseAllPanel(bool wantRemove = true)
         {
+            if (_panelDict == null || _panelDict.Count == 0)
+                return;
+
             var panelNames = new List<string>(_panelDict.Keys);
             foreach (var panelName in panelNames)
             {
-                ClosePanel(panelName, wantRemove);
+                if (_panelDict.TryGetValue(panelName, out var panel))
+                {
+                    if (panel != null && panel.gameObject != null)
+                    {
+                        ClosePanel(panelName, wantRemove);
+                    }
+                    else
+                    {
+                        _panelDict.Remove(panelName);
+                    }
+                }
             }
         }
 
@@ -239,7 +356,7 @@ namespace UI
             var pool = _panelPool[panelName];
             for (int i = 0; i < _initialPoolSize; i++)
             {
-                var panelObj = UnityEngine.Object.Instantiate(prefab, _panelPoolRoot.transform, false);
+                var panelObj = UnityEngine.Object.Instantiate(prefab, _panelPoolRoot != null ? _panelPoolRoot.transform : null, false);
                 var panel = panelObj.GetComponent<BasePanel>();
                 if (panel != null)
                 {
@@ -265,10 +382,17 @@ namespace UI
 
             if (_panelPoolRoot != null)
             {
-                UnityEngine.Object.Destroy(_panelPoolRoot);
+                var go = _panelPoolRoot;
                 _panelPoolRoot = null;
+                
+                if (go != null && !go.Equals(null) && Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(go);
+                }
             }
         }
+
+        #endregion
     }
 
     public class UIConst

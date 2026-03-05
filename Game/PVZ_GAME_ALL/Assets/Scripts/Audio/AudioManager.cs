@@ -250,6 +250,11 @@ namespace Audio
                     autoExpand = true,
                     autoReleaseOnSceneChange = true
                 };
+
+                if (!string.IsNullOrEmpty(config.audio.startupBGMPath))
+                {
+                    PlayStartupBGM(config.audio.startupBGMPath);
+                }
             }
 
             InitializeSFXPool();
@@ -257,6 +262,20 @@ namespace Audio
             _isInitialized = true;
 
             Debug.Log("[AudioManager] Initialized successfully");
+        }
+
+        private void PlayStartupBGM(string bgmPath)
+        {
+            var clip = ResourceManager.Load<AudioClip>(bgmPath);
+            if (clip != null)
+            {
+                PlayBGM(clip);
+                Debug.Log($"[AudioManager] Playing startup BGM: {bgmPath}");
+            }
+            else
+            {
+                Debug.LogWarning($"[AudioManager] Startup BGM not found: {bgmPath}");
+            }
         }
 
         /// <summary>
