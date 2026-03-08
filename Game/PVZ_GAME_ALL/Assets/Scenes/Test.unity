@@ -309,7 +309,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8666019544999268838, guid: ec6ae78c90e3e9746a05596694354479, type: 3}
       propertyPath: m_Name
-      value: INIT
+      value: GAMEINIT
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

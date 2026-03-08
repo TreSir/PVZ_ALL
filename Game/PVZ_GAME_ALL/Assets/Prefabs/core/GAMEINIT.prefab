@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 418056986207703859}
   - component: {fileID: 5329307802682286284}
   m_Layer: 0
-  m_Name: INIT
+  m_Name: GAMEINIT
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
