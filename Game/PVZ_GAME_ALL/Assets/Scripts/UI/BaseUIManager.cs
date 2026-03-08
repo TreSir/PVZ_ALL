@@ -28,8 +28,10 @@ namespace UI
 
         private Dictionary<string, string> _pathDict;
         private Dictionary<string, GameObject> _prefabDict;
-        public Dictionary<string, BasePanel> _panelDict;
+        private Dictionary<string, BasePanel> _panelDict;
         private Dictionary<string, Queue<BasePanel>> _panelPool;
+
+        public IReadOnlyDictionary<string, BasePanel> PanelDict => _panelDict;
         private Transform _uiRoot;
         private GameObject _panelPoolRoot;
         private bool _usePool = true;

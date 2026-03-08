@@ -13,6 +13,9 @@ namespace Config
 
         [Header("UI Settings")]
         public UISettings ui = new UISettings();
+
+        [Header("Data Settings")]
+        public DataSettings data = new DataSettings();
     }
 
     [System.Serializable]
@@ -58,5 +61,18 @@ namespace Config
         [Tooltip("UI 面板池初始大小")]
         [Min(1)]
         public int panelPoolInitialSize = 3;
+    }
+
+    [System.Serializable]
+    public class DataSettings
+    {
+        [Tooltip("是否启用配置数据缓存")]
+        public bool enableCache = true;
+
+        [Tooltip("持久化数据存储目录名")]
+        public string persistentFolderName = "GameData";
+
+        [Tooltip("自动保存间隔（秒），0表示禁用自动保存")]
+        public float autoSaveInterval = 60f;
     }
 }
