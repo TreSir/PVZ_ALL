@@ -52,6 +52,7 @@ namespace DataManager
         public int CurrentSlotIndex => _currentSlotIndex;
         public bool HasUnsavedChanges => _hasUnsavedChanges;
         public bool HasValidSave => _currentSlotIndex >= 0 && _saveSlotInfos.ContainsKey(_currentSlotIndex);
+        public string PersistentDataPath => _persistentDataPath;
 
         public event System.Action<int> OnAutoSaveRequested;
 
@@ -105,8 +106,10 @@ namespace DataManager
                 return;
 
             _autoSaveTimer += deltaTime;
+
             if (_autoSaveTimer >= _settings.autoSaveInterval)
             {
+                Debug.Log($"[SaveManager] Auto save triggered! Timer: {_autoSaveTimer:F1}s >= Interval: {_settings.autoSaveInterval:F1}s, Slot: {_currentSlotIndex}");
                 _autoSaveTimer = 0f;
                 AutoSave();
             }
