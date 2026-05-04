@@ -16,7 +16,6 @@ namespace UI
 
     public abstract class BasePanel : MonoBehaviour
     {
-        public bool isRemove = false;
         public abstract string UIName { get; }
 
         protected UILifeCycleState _state = UILifeCycleState.None;
@@ -64,11 +63,8 @@ namespace UI
 
             _state = UILifeCycleState.Closing;
             OnBeforeClose();
-            isRemove = true;
             SetActive(false);
             _state = UILifeCycleState.Closed;
-
-            BaseUIManager.Instance.OnPanelClosed(UIName);
 
             if (_state == UILifeCycleState.Closed)
             {

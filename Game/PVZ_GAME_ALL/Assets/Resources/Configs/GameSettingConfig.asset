@@ -20,3 +20,11 @@ MonoBehaviour:
   pool:
     audioInitialPoolSize: 15
     audioMaxPoolSize: 30
+  ui:
+    startupPanelName: MainMenuPanel
+    enablePanelPool: 1
+    panelPoolInitialSize: 3
+  data:
+    enableCache: 1
+    persistentFolderName: GameData
+    autoSaveInterval: 60

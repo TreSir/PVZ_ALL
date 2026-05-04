@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ObjectPool;
 using GameBase;
 using Config;
 using SourceLoad;
@@ -25,8 +24,9 @@ namespace UI
         public int Priority => 2000;
 
         private const string ConfigPath = "Configs/GameSettingConfig";
+        private const string UIPrefabRoot = "Prefabs/UI/";
 
-        private Dictionary<string, string> _pathDict;
+        private Dictionary<string, string> _customPathDict;
         private Dictionary<string, GameObject> _prefabDict;
         private Dictionary<string, BasePanel> _panelDict;
         private Dictionary<string, Queue<BasePanel>> _panelPool;
@@ -37,6 +37,7 @@ namespace UI
         private bool _usePool = true;
         private int _initialPoolSize = 5;
         private bool _isInitialized;
+        private int _sortingOrder = 1;
 
         public Transform UIRoot
         {
@@ -58,8 +59,6 @@ namespace UI
             }
         }
 
-        public int sortingOrder = 1;
-
         public BaseUIManager()
         {
             if (_instance != null && _instance != this)
@@ -75,16 +74,18 @@ namespace UI
             _prefabDict = new Dictionary<string, GameObject>();
             _panelDict = new Dictionary<string, BasePanel>();
             _panelPool = new Dictionary<string, Queue<BasePanel>>();
-            _pathDict = new Dictionary<string, string>()
-            {
-                {UIConst.MainMenuPanel, "MainMenuPanel"}
-            };
+            _customPathDict = new Dictionary<string, string>();
         }
 
-        public void SetUsePool(bool usePool, int initialPoolSize = 5)
+        public void RegisterCustomPath(string panelName, string customPath)
         {
-            _usePool = usePool;
-            _initialPoolSize = initialPoolSize;
+            if (string.IsNullOrEmpty(panelName) || string.IsNullOrEmpty(customPath))
+            {
+                Debug.LogWarning("[BaseUIManager] Panel name and path cannot be null or empty");
+                return;
+            }
+
+            _customPathDict[panelName] = customPath;
         }
 
         #region IGameSystem Implementation
@@ -102,17 +103,13 @@ namespace UI
             var config = ResourceManager.Load<GameSettingConfig>(ConfigPath);
             if (config == null)
             {
-                Debug.LogWarning($"[BaseUIManager] Config not found at Resources/{ConfigPath}");
-                OpenDefaultPanel();
+                Debug.LogError($"[BaseUIManager] Config not found at Resources/{ConfigPath}");
                 _isInitialized = true;
                 return;
             }
 
-            if (config.ui.enablePanelPool)
-            {
-                _usePool = true;
-                _initialPoolSize = config.ui.panelPoolInitialSize;
-            }
+            _usePool = config.ui.enablePanelPool;
+            _initialPoolSize = config.ui.panelPoolInitialSize;
 
             if (!string.IsNullOrEmpty(config.ui.startupPanelName))
             {
@@ -126,7 +123,7 @@ namespace UI
         public void Shutdown()
         {
             Debug.Log("[BaseUIManager] Shutting down...");
-            
+
             if (!Application.isPlaying)
             {
                 _panelDict?.Clear();
@@ -135,7 +132,7 @@ namespace UI
                 _isInitialized = false;
                 return;
             }
-            
+
             CloseAllPanel();
             ClearPool();
             _isInitialized = false;
@@ -150,17 +147,7 @@ namespace UI
             }
             else
             {
-                Debug.LogWarning($"[BaseUIManager] Failed to open startup panel: {panelName}");
-                OpenDefaultPanel();
-            }
-        }
-
-        private void OpenDefaultPanel()
-        {
-            var panel = OpenPanel(UIConst.MainMenuPanel);
-            if (panel != null)
-            {
-                Debug.Log($"[BaseUIManager] Opened default panel: {UIConst.MainMenuPanel}");
+                Debug.LogError($"[BaseUIManager] Failed to open startup panel: {panelName}");
             }
         }
 
@@ -168,11 +155,18 @@ namespace UI
 
         #region Panel Management
 
+        private string GetPanelPath(string panelName)
+        {
+            if (_customPathDict.TryGetValue(panelName, out var customPath))
+            {
+                return customPath;
+            }
+            return panelName;
+        }
+
         public BasePanel OpenPanel(string panelName)
         {
-            BasePanel panel = null;
-
-            if (_panelDict.TryGetValue(panelName, out panel))
+            if (_panelDict.TryGetValue(panelName, out var panel))
             {
                 Debug.Log($"[BaseUIManager] Panel {panelName} is already opened");
                 panel.SetActive(true);
@@ -189,20 +183,15 @@ namespace UI
                 return panel;
             }
 
-            string path = null;
-            if (!_pathDict.TryGetValue(panelName, out path))
-            {
-                Debug.LogWarning($"[BaseUIManager] Panel path not found: {panelName}");
-                return null;
-            }
+            string path = GetPanelPath(panelName);
 
             GameObject prefab = null;
             if (!_prefabDict.TryGetValue(panelName, out prefab))
             {
-                prefab = Resources.Load<GameObject>("Prefabs/UI/" + path);
+                prefab = Resources.Load<GameObject>(UIPrefabRoot + path);
                 if (prefab == null)
                 {
-                    Debug.LogWarning($"[BaseUIManager] Panel prefab not found: Prefabs/UI/{path}");
+                    Debug.LogWarning($"[BaseUIManager] Panel prefab not found: {UIPrefabRoot}{path}");
                     return null;
                 }
                 _prefabDict[panelName] = prefab;
@@ -229,12 +218,12 @@ namespace UI
             var canvas = panelObject.GetComponent<UnityEngine.Canvas>();
             if (canvas != null)
             {
-                canvas.sortingOrder = sortingOrder;
-                sortingOrder++;
+                canvas.sortingOrder = _sortingOrder;
+                _sortingOrder++;
             }
         }
 
-        public bool ClosePanel(string panelName, bool wantRemove = true)
+        public bool ClosePanel(string panelName)
         {
             if (!_panelDict.TryGetValue(panelName, out var panel))
             {
@@ -248,16 +237,13 @@ namespace UI
                 return false;
             }
 
-            if (wantRemove)
+            if (_usePool && panel.gameObject != null)
             {
-                if (_usePool && panel.gameObject != null)
-                {
-                    ReturnToPool(panelName, panel);
-                }
-                else if (panel.gameObject != null)
-                {
-                    panel.ClosePanel();
-                }
+                ReturnToPool(panelName, panel);
+            }
+            else if (panel.gameObject != null)
+            {
+                panel.ClosePanel();
             }
 
             _panelDict.Remove(panelName);
@@ -292,7 +278,7 @@ namespace UI
             Debug.Log($"[BaseUIManager] Panel {panelName} returned to pool. Pool size: {pool.Count}");
         }
 
-        public void CloseAllPanel(bool wantRemove = true)
+        public void CloseAllPanel()
         {
             if (_panelDict == null || _panelDict.Count == 0)
                 return;
@@ -300,22 +286,8 @@ namespace UI
             var panelNames = new List<string>(_panelDict.Keys);
             foreach (var panelName in panelNames)
             {
-                if (_panelDict.TryGetValue(panelName, out var panel))
-                {
-                    if (panel != null && panel.gameObject != null)
-                    {
-                        ClosePanel(panelName, wantRemove);
-                    }
-                    else
-                    {
-                        _panelDict.Remove(panelName);
-                    }
-                }
+                ClosePanel(panelName);
             }
-        }
-
-        public void OnPanelClosed(string panelName)
-        {
         }
 
         public bool IsPanelOpened(string panelName)
@@ -334,19 +306,19 @@ namespace UI
 
         public void PreloadPanel(string panelName)
         {
-            if (!_pathDict.ContainsKey(panelName))
-            {
-                Debug.LogWarning($"[BaseUIManager] Panel path not found for preload: {panelName}");
-                return;
-            }
+            string path = GetPanelPath(panelName);
 
             if (!_prefabDict.TryGetValue(panelName, out var prefab))
             {
-                var path = _pathDict[panelName];
-                prefab = Resources.Load<GameObject>("Prefabs/UI/" + path);
+                prefab = Resources.Load<GameObject>(UIPrefabRoot + path);
                 if (prefab != null)
                 {
                     _prefabDict[panelName] = prefab;
+                }
+                else
+                {
+                    Debug.LogWarning($"[BaseUIManager] Panel prefab not found for preload: {UIPrefabRoot}{path}");
+                    return;
                 }
             }
 
@@ -386,7 +358,7 @@ namespace UI
             {
                 var go = _panelPoolRoot;
                 _panelPoolRoot = null;
-                
+
                 if (go != null && !go.Equals(null) && Application.isPlaying)
                 {
                     UnityEngine.Object.Destroy(go);
@@ -395,10 +367,5 @@ namespace UI
         }
 
         #endregion
-    }
-
-    public class UIConst
-    {
-        public const string MainMenuPanel = "MainMenuPanel";
     }
 }
